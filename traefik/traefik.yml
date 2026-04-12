@@ -21,7 +21,7 @@ providers:
 certificatesResolvers:
   letsencrypt:
     acme:
-      email: your-email@example.com   # change this — Let's Encrypt sends expiry notices here
+      email: salhab.amjad.443@gmail.com
       storage: /acme.json
       httpChallenge:
         entryPoint: web
