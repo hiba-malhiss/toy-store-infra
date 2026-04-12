@@ -1,0 +1,25 @@
+# Shared reverse proxy — run ONCE on server setup, never per-customer.
+#
+# First-time setup:
+#   touch acme.json && chmod 600 acme.json
+#   docker network create traefik-public
+#   docker compose up -d
+
+services:
+  traefik:
+    image: traefik:v3.3
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro   # watch containers
+      - ./traefik.yml:/traefik.yml:ro                  # static config
+      - ./acme.json:/acme.json                         # SSL cert storage
+    networks:
+      - traefik-public
+
+networks:
+  traefik-public:
+    external: true

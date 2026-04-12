@@ -1,0 +1,133 @@
+# Customer stack template.
+# Never run directly — always use:
+#   docker compose -p <customer_name> --env-file customers/<customer_name>/.env up -d
+#
+# Each `docker compose -p <name>` run creates a fully isolated stack:
+# containers, networks, and volumes are all namespaced by project name.
+
+services:
+
+  # ── Reverse proxy label sink ──────────────────────────────────────────────
+  # Traefik picks up routing rules from these labels automatically.
+  # SSL certs are provisioned by the shared Traefik instance (traefik/).
+
+  mysql:
+    image: mysql:8.0
+    container_name: ${CUSTOMER_NAME}-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - customer-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${CUSTOMER_NAME}-redis
+    networks:
+      - customer-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    image: ghcr.io/${GITHUB_OWNER}/toy-store-backend:${CUSTOMER_NAME}
+    container_name: ${CUSTOMER_NAME}-backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: ${DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET}
+      SPRING_MAIL_USERNAME: ${MAIL_USERNAME}
+      SPRING_MAIL_PASSWORD: ${MAIL_PASSWORD}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
+      ALLOWED_ORIGINS: https://${STORE_DOMAIN},https://${ADMIN_DOMAIN}
+    networks:
+      - customer-net
+      - traefik-public
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.routers.${CUSTOMER_NAME}-api.rule=Host(`${STORE_DOMAIN}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.${CUSTOMER_NAME}-api.entrypoints=websecure"
+      - "traefik.http.routers.${CUSTOMER_NAME}-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.${CUSTOMER_NAME}-api.loadbalancer.server.port=8080"
+
+  store:
+    image: ghcr.io/${GITHUB_OWNER}/toy-store-store:${CUSTOMER_NAME}
+    container_name: ${CUSTOMER_NAME}-store
+    networks:
+      - customer-net
+      - traefik-public
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.routers.${CUSTOMER_NAME}-store.rule=Host(`${STORE_DOMAIN}`)"
+      - "traefik.http.routers.${CUSTOMER_NAME}-store.entrypoints=websecure"
+      - "traefik.http.routers.${CUSTOMER_NAME}-store.tls.certresolver=letsencrypt"
+      - "traefik.http.services.${CUSTOMER_NAME}-store.loadbalancer.server.port=80"
+
+  admin:
+    image: ghcr.io/${GITHUB_OWNER}/toy-store-admin:${CUSTOMER_NAME}
+    container_name: ${CUSTOMER_NAME}-admin
+    networks:
+      - customer-net
+      - traefik-public
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.routers.${CUSTOMER_NAME}-admin.rule=Host(`${ADMIN_DOMAIN}`)"
+      - "traefik.http.routers.${CUSTOMER_NAME}-admin.entrypoints=websecure"
+      - "traefik.http.routers.${CUSTOMER_NAME}-admin.tls.certresolver=letsencrypt"
+      - "traefik.http.services.${CUSTOMER_NAME}-admin.loadbalancer.server.port=80"
+
+  game:
+    image: ghcr.io/${GITHUB_OWNER}/toy-store-game:${CUSTOMER_NAME}
+    container_name: ${CUSTOMER_NAME}-game
+    networks:
+      - customer-net
+      - traefik-public
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.routers.${CUSTOMER_NAME}-game.rule=Host(`${GAME_DOMAIN}`)"
+      - "traefik.http.routers.${CUSTOMER_NAME}-game.entrypoints=websecure"
+      - "traefik.http.routers.${CUSTOMER_NAME}-game.tls.certresolver=letsencrypt"
+      - "traefik.http.services.${CUSTOMER_NAME}-game.loadbalancer.server.port=80"
+
+volumes:
+  mysql-data:
+
+networks:
+  # Internal network — containers talk to each other, not exposed
+  customer-net:
+    driver: bridge
+
+  # Shared external network — Traefik routes into it
+  traefik-public:
+    external: true

@@ -1,0 +1,5 @@
+# Never commit customer secrets
+customers/*/.env
+
+# Traefik stores certs here at runtime
+traefik/acme.json
