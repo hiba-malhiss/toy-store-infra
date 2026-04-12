@@ -3,7 +3,7 @@ api:
 
 entryPoints:
   web:
-    address: ":8080"    # TODO: change back to :80 once old nginx is removed
+    address: ":80"
     http:
       redirections:
         entryPoint:
@@ -11,7 +11,7 @@ entryPoints:
           scheme: https
           permanent: true
   websecure:
-    address: ":8443"    # TODO: change back to :443 once old nginx is removed
+    address: ":443"
 
 providers:
   docker:
