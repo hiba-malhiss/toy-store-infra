@@ -11,8 +11,8 @@ services:
     container_name: traefik
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      - "8080:8080"     # TODO: change back to 80:80 once old nginx is removed
+      - "8443:8443"     # TODO: change back to 443:443 once old nginx is removed
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro   # watch containers
       - ./traefik.yml:/traefik.yml:ro                  # static config
