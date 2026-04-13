@@ -4,12 +4,14 @@
 #
 # Each `docker compose -p <name>` run creates a fully isolated stack:
 # containers, networks, and volumes are all namespaced by project name.
+#
+# All services share a single domain:
+#   https://{STORE_DOMAIN}/        → store
+#   https://{STORE_DOMAIN}/admin   → admin  (Traefik strips /admin before forwarding)
+#   https://{STORE_DOMAIN}/game    → game   (Traefik strips /game before forwarding)
+#   https://{STORE_DOMAIN}/api     → backend
 
 services:
-
-  # ── Reverse proxy label sink ──────────────────────────────────────────────
-  # Traefik picks up routing rules from these labels automatically.
-  # SSL certs are provisioned by the shared Traefik instance (traefik/).
 
   mysql:
     image: mysql:8.0
@@ -45,8 +47,6 @@ services:
   backend:
     image: ghcr.io/${GITHUB_OWNER}/toy-store-backend:${CUSTOMER_NAME}
     container_name: ${CUSTOMER_NAME}-backend
-    # env_file provides all app secrets; environment: overrides only infrastructure
-    # vars that depend on container names (DB host, Redis host, CORS origins)
     env_file:
       - customers/${CUSTOMER_NAME}/.env
     environment:
@@ -56,7 +56,7 @@ services:
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
       FRONTEND_URL: https://${STORE_DOMAIN}
-      CORS_ALLOWED_ORIGINS: "https://${STORE_DOMAIN},https://${ADMIN_DOMAIN}"
+      CORS_ALLOWED_ORIGINS: "https://${STORE_DOMAIN}"
     networks:
       - customer-net
       - traefik-public
@@ -84,10 +84,12 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-public"
+      # Lowest priority — catches everything not matched by /api, /admin, /game
       - "traefik.http.routers.${CUSTOMER_NAME}-store.rule=Host(`${STORE_DOMAIN}`)"
       - "traefik.http.routers.${CUSTOMER_NAME}-store.entrypoints=websecure"
       - "traefik.http.routers.${CUSTOMER_NAME}-store.tls.certresolver=letsencrypt"
       - "traefik.http.services.${CUSTOMER_NAME}-store.loadbalancer.server.port=80"
+      - "traefik.http.routers.${CUSTOMER_NAME}-store.priority=1"
 
   admin:
     image: ghcr.io/${GITHUB_OWNER}/toy-store-admin:${CUSTOMER_NAME}
@@ -99,10 +101,13 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-public"
-      - "traefik.http.routers.${CUSTOMER_NAME}-admin.rule=Host(`${ADMIN_DOMAIN}`)"
+      - "traefik.http.routers.${CUSTOMER_NAME}-admin.rule=Host(`${STORE_DOMAIN}`) && PathPrefix(`/admin`)"
       - "traefik.http.routers.${CUSTOMER_NAME}-admin.entrypoints=websecure"
       - "traefik.http.routers.${CUSTOMER_NAME}-admin.tls.certresolver=letsencrypt"
       - "traefik.http.services.${CUSTOMER_NAME}-admin.loadbalancer.server.port=80"
+      # Strip /admin prefix before forwarding — nginx in container serves from root
+      - "traefik.http.middlewares.${CUSTOMER_NAME}-admin-strip.stripprefix.prefixes=/admin"
+      - "traefik.http.routers.${CUSTOMER_NAME}-admin.middlewares=${CUSTOMER_NAME}-admin-strip"
 
   game:
     image: ghcr.io/${GITHUB_OWNER}/toy-store-game:${CUSTOMER_NAME}
@@ -114,19 +119,19 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-public"
-      - "traefik.http.routers.${CUSTOMER_NAME}-game.rule=Host(`${GAME_DOMAIN}`)"
+      - "traefik.http.routers.${CUSTOMER_NAME}-game.rule=Host(`${STORE_DOMAIN}`) && PathPrefix(`/game`)"
       - "traefik.http.routers.${CUSTOMER_NAME}-game.entrypoints=websecure"
       - "traefik.http.routers.${CUSTOMER_NAME}-game.tls.certresolver=letsencrypt"
       - "traefik.http.services.${CUSTOMER_NAME}-game.loadbalancer.server.port=80"
+      # Strip /game prefix before forwarding
+      - "traefik.http.middlewares.${CUSTOMER_NAME}-game-strip.stripprefix.prefixes=/game"
+      - "traefik.http.routers.${CUSTOMER_NAME}-game.middlewares=${CUSTOMER_NAME}-game-strip"
 
 volumes:
   mysql-data:
 
 networks:
-  # Internal network — containers talk to each other, not exposed
   customer-net:
     driver: bridge
-
-  # Shared external network — Traefik routes into it
   traefik-public:
     external: true
