@@ -22,7 +22,7 @@ services:
       MYSQL_USER: ${DB_USER}
       MYSQL_PASSWORD: ${DB_PASSWORD}
     volumes:
-      - mysql-data:/var/lib/mysql
+      - /opt/toy-store-data/${CUSTOMER_NAME}/mysql:/var/lib/mysql
     networks:
       - customer-net
     restart: unless-stopped
@@ -126,9 +126,6 @@ services:
       # Strip /game prefix before forwarding
       - "traefik.http.middlewares.${CUSTOMER_NAME}-game-strip.stripprefix.prefixes=/game"
       - "traefik.http.routers.${CUSTOMER_NAME}-game.middlewares=${CUSTOMER_NAME}-game-strip"
-
-volumes:
-  mysql-data:
 
 networks:
   customer-net:
