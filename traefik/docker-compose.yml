@@ -22,6 +22,28 @@ services:
     networks:
       - traefik-public
 
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portainer-data:/data
+    networks:
+      - traefik-public
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.portainer.rule=Host(`portainer.alkatatib.cloud`)"
+      - "traefik.http.routers.portainer.entrypoints=websecure"
+      - "traefik.http.routers.portainer.tls.certresolver=letsencrypt"
+      - "traefik.http.services.portainer.loadbalancer.server.port=9000"
+      # Basic auth — password hashed with bcrypt (each $ doubled for compose escaping)
+      - "traefik.http.middlewares.portainer-auth.basicauth.users=admin:$$2y$$05$$Fl4dxRoO8VoSjtChFakz4.83zxfs2/aWmGrPzUtECtFLRd8oVcqwW"
+      - "traefik.http.routers.portainer.middlewares=portainer-auth"
+
+volumes:
+  portainer-data:
+
 networks:
   traefik-public:
     external: true
