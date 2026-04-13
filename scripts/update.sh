@@ -20,6 +20,14 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 
 COMPOSE="docker compose -p $CUSTOMER --env-file $ENV_FILE -f $DIR/docker-compose.yml"
+TOKEN_FILE="$DIR/.ghcr-token"
+
+if [ -f "$TOKEN_FILE" ]; then
+  echo "==> Logging in to GHCR..."
+  cat "$TOKEN_FILE" | docker login ghcr.io -u hiba-malhiss --password-stdin
+else
+  echo "Warning: .ghcr-token not found — skipping docker login."
+fi
 
 echo "==> Pulling latest images for $CUSTOMER ${SERVICES[*]:-}..."
 $COMPOSE pull "${SERVICES[@]}"

@@ -1,5 +1,8 @@
 # Never commit customer secrets
 customers/*/.env
 
+# GHCR pull token — created manually on the server
+.ghcr-token
+
 # Traefik stores certs here at runtime
 traefik/acme.json
