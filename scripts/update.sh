@@ -40,7 +40,7 @@ echo "==> Done. Stack '$CUSTOMER' updated."
 # ── Deployment summary ────────────────────────────────────────
 STORE_DOMAIN=$(grep '^STORE_DOMAIN=' "$ENV_FILE" | cut -d '=' -f2)
 ADMIN_DOMAIN=$(grep '^ADMIN_DOMAIN=' "$ENV_FILE" | cut -d '=' -f2)
-VPS_IP=$(curl -s ifconfig.me)
+VPS_IP=$(curl -s --max-time 5 ifconfig.me || echo "unavailable")
 
 echo ""
 echo "╔══════════════════════════════════════════════════════════╗"
