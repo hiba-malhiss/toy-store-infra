@@ -2,14 +2,14 @@
 # Never run directly — always use:
 #   docker compose -p <customer_name> --env-file customers/<customer_name>/.env up -d
 #
-# Each `docker compose -p <name>` run creates a fully isolated stack:
+# Each `docker compose -p <n>` run creates a fully isolated stack:
 # containers, networks, and volumes are all namespaced by project name.
 #
-# All services share a single domain:
+# Domain layout:
 #   https://{STORE_DOMAIN}/        → store
-#   https://{STORE_DOMAIN}/admin   → admin  (Traefik strips /admin before forwarding)
 #   https://{STORE_DOMAIN}/game    → game   (Traefik strips /game before forwarding)
 #   https://{STORE_DOMAIN}/api     → backend
+#   https://{ADMIN_DOMAIN}/        → admin  (separate subdomain, e.g. test-customer-admin.alkatatib.cloud)
 
 services:
 
@@ -56,7 +56,7 @@ services:
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
       FRONTEND_URL: https://${STORE_DOMAIN}
-      CORS_ALLOWED_ORIGINS: "https://${STORE_DOMAIN}"
+      CORS_ALLOWED_ORIGINS: "https://${STORE_DOMAIN},https://${ADMIN_DOMAIN}"
     networks:
       - customer-net
       - traefik-public
@@ -84,7 +84,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-public"
-      # Lowest priority — catches everything not matched by /api, /admin, /game
+      # Lowest priority — catches everything not matched by /api or /game
       - "traefik.http.routers.${CUSTOMER_NAME}-store.rule=Host(`${STORE_DOMAIN}`)"
       - "traefik.http.routers.${CUSTOMER_NAME}-store.entrypoints=websecure"
       - "traefik.http.routers.${CUSTOMER_NAME}-store.tls.certresolver=letsencrypt"
@@ -101,13 +101,11 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-public"
-      - "traefik.http.routers.${CUSTOMER_NAME}-admin.rule=Host(`${STORE_DOMAIN}`) && PathPrefix(`/admin`)"
+      # Admin now lives on its own subdomain — no path stripping needed
+      - "traefik.http.routers.${CUSTOMER_NAME}-admin.rule=Host(`${ADMIN_DOMAIN}`)"
       - "traefik.http.routers.${CUSTOMER_NAME}-admin.entrypoints=websecure"
       - "traefik.http.routers.${CUSTOMER_NAME}-admin.tls.certresolver=letsencrypt"
       - "traefik.http.services.${CUSTOMER_NAME}-admin.loadbalancer.server.port=80"
-      # Strip /admin prefix before forwarding — nginx in container serves from root
-      - "traefik.http.middlewares.${CUSTOMER_NAME}-admin-strip.stripprefix.prefixes=/admin"
-      - "traefik.http.routers.${CUSTOMER_NAME}-admin.middlewares=${CUSTOMER_NAME}-admin-strip"
 
   game:
     image: ghcr.io/${GITHUB_OWNER}/toy-store-game:${CUSTOMER_NAME}

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Usage: ./scripts/new-customer.sh <customer_name>
-# Creates customers/<name>/.env from .env.defaults with CUSTOMER_NAME and
-# STORE_DOMAIN auto-filled, then prints the next step.
+# Creates customers/<name>/.env from .env.defaults with CUSTOMER_NAME,
+# STORE_DOMAIN, and ADMIN_DOMAIN auto-filled, then prints the next step.
 set -euo pipefail
 
 CUSTOMER=${1:?Usage: $0 <customer_name>}
@@ -22,18 +22,22 @@ fi
 
 mkdir -p "$DIR/customers/$CUSTOMER"
 
-# Copy defaults and substitute CUSTOMER_NAME + STORE_DOMAIN
+# Copy defaults and substitute CUSTOMER_NAME, STORE_DOMAIN, and ADMIN_DOMAIN
 sed \
   -e "s/^CUSTOMER_NAME=$/CUSTOMER_NAME=$CUSTOMER/" \
   -e "s/^STORE_DOMAIN=$/STORE_DOMAIN=$CUSTOMER.$BASE_DOMAIN/" \
+  -e "s/^ADMIN_DOMAIN=$/ADMIN_DOMAIN=$CUSTOMER-admin.$BASE_DOMAIN/" \
   "$DEFAULTS" > "$ENV_FILE"
 
 echo ""
 echo "Created customers/$CUSTOMER/.env"
 echo "  CUSTOMER_NAME = $CUSTOMER"
 echo "  STORE_DOMAIN  = $CUSTOMER.$BASE_DOMAIN"
+echo "  ADMIN_DOMAIN  = $CUSTOMER-admin.$BASE_DOMAIN"
 echo ""
-echo "Make sure DNS record exists: $CUSTOMER.$BASE_DOMAIN → your VPS IP"
+echo "Make sure these DNS A records point to your VPS IP:"
+echo "  $CUSTOMER.$BASE_DOMAIN        → your VPS IP"
+echo "  $CUSTOMER-admin.$BASE_DOMAIN  → your VPS IP"
 echo ""
 echo "Then run:"
 echo "  ./scripts/deploy.sh $CUSTOMER"

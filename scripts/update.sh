@@ -39,6 +39,7 @@ echo "==> Done. Stack '$CUSTOMER' updated."
 
 # ── Deployment summary ────────────────────────────────────────
 STORE_DOMAIN=$(grep '^STORE_DOMAIN=' "$ENV_FILE" | cut -d '=' -f2)
+ADMIN_DOMAIN=$(grep '^ADMIN_DOMAIN=' "$ENV_FILE" | cut -d '=' -f2)
 VPS_IP=$(curl -s ifconfig.me)
 
 echo ""
@@ -46,7 +47,7 @@ echo "╔═══════════════════════�
 echo "║           Deployment Summary — $CUSTOMER"
 echo "╠══════════════════════════════════════════════════════════╣"
 echo "║  🌐 Store      https://${STORE_DOMAIN}/"
-echo "║  🔧 Admin      https://${STORE_DOMAIN}/admin"
+echo "║  🔧 Admin      https://${ADMIN_DOMAIN}/"
 echo "║  🎮 Game       https://${STORE_DOMAIN}/game"
 echo "║  🔌 API        https://${STORE_DOMAIN}/api"
 echo "║  ❤️  Health     https://${STORE_DOMAIN}/api/actuator/health"
