@@ -26,18 +26,18 @@ mkdir -p "$DIR/customers/$CUSTOMER"
 sed \
   -e "s/^CUSTOMER_NAME=$/CUSTOMER_NAME=$CUSTOMER/" \
   -e "s/^STORE_DOMAIN=$/STORE_DOMAIN=$CUSTOMER.$BASE_DOMAIN/" \
-  -e "s/^ADMIN_DOMAIN=$/ADMIN_DOMAIN=$CUSTOMER-admin.$BASE_DOMAIN/" \
+  -e "s/^ADMIN_DOMAIN=$/ADMIN_DOMAIN=admin-$CUSTOMER.$BASE_DOMAIN/" \
   "$DEFAULTS" > "$ENV_FILE"
 
 echo ""
 echo "Created customers/$CUSTOMER/.env"
 echo "  CUSTOMER_NAME = $CUSTOMER"
 echo "  STORE_DOMAIN  = $CUSTOMER.$BASE_DOMAIN"
-echo "  ADMIN_DOMAIN  = $CUSTOMER-admin.$BASE_DOMAIN"
+echo "  ADMIN_DOMAIN  = admin-$CUSTOMER.$BASE_DOMAIN"
 echo ""
 echo "Make sure these DNS A records point to your VPS IP:"
 echo "  $CUSTOMER.$BASE_DOMAIN        → your VPS IP"
-echo "  $CUSTOMER-admin.$BASE_DOMAIN  → your VPS IP"
+echo "  admin-$CUSTOMER.$BASE_DOMAIN  → your VPS IP"
 echo ""
 echo "Then run:"
 echo "  ./scripts/deploy.sh $CUSTOMER"
