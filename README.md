@@ -1,6 +1,6 @@
 # Toy Store Infra
 
-Multi-tenant deployment infrastructure for the Toy Store platform. Each customer gets a fully isolated Docker stack (backend, store, admin, game) served through a shared Traefik reverse proxy with automatic HTTPS. A shared MySQL instance and phpMyAdmin run as a separate stack.
+Multi-tenant deployment infrastructure for the Toy Store platform. Each customer gets a fully isolated Docker stack (backend, store, admin, game, Redis) served through a shared Traefik reverse proxy with automatic HTTPS. A shared MySQL and phpMyAdmin run as a separate stack.
 
 ---
 
@@ -24,6 +24,7 @@ Shared database stack (one instance for all customers):
   phpmyadmin      phpMyAdmin (view all customer DBs)
 
 Per-customer stack (docker compose project = customer name):
+  {customer}-redis    Redis 7
   {customer}-backend  Spring Boot  (image from ghcr.io)
   {customer}-store    Nginx serving React store
   {customer}-admin    Nginx serving React admin panel
@@ -33,7 +34,8 @@ Per-customer stack (docker compose project = customer name):
 Three Docker networks:
 - **`traefik-public`** — HTTP/HTTPS routing (Traefik ↔ all web-facing containers)
 - **`shared-db`** — backend ↔ MySQL communication (TCP port 3306, no internet exposure)
-- Store/admin/game frontends are on `traefik-public` only (no DB access)
+- **`customer-net`** — backend ↔ Redis (private per-customer bridge)
+- Store/admin/game frontends are on `traefik-public` only (no DB/Redis access)
 
 ---
 

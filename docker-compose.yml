@@ -24,11 +24,17 @@ services:
       SPRING_DATASOURCE_URL: "jdbc:mysql://shared-mysql:3306/${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
       SPRING_DATASOURCE_USERNAME: ${DB_USER}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
       FRONTEND_URL: https://${STORE_DOMAIN}
       CORS_ALLOWED_ORIGINS: "https://${STORE_DOMAIN},https://${ADMIN_DOMAIN}"
     networks:
+      - customer-net
       - shared-db
       - traefik-public
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
@@ -37,6 +43,18 @@ services:
       - "traefik.http.routers.${CUSTOMER_NAME}-api.entrypoints=websecure"
       - "traefik.http.routers.${CUSTOMER_NAME}-api.tls.certresolver=letsencrypt"
       - "traefik.http.services.${CUSTOMER_NAME}-api.loadbalancer.server.port=8080"
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${CUSTOMER_NAME}-redis
+    networks:
+      - customer-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   store:
     image: ghcr.io/${GITHUB_OWNER}/toy-store-store:${CUSTOMER_NAME}
@@ -87,6 +105,8 @@ services:
       - "traefik.http.routers.${CUSTOMER_NAME}-game.middlewares=${CUSTOMER_NAME}-game-strip"
 
 networks:
+  customer-net:
+    driver: bridge
   shared-db:
     external: true
   traefik-public:
