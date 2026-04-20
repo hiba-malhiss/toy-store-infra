@@ -1,6 +1,9 @@
 # Never commit customer secrets
 customers/*/.env
 
+# Shared database stack secrets
+database/.env
+
 # GHCR pull token — created manually on the server
 .ghcr-token
 

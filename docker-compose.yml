@@ -10,39 +10,10 @@
 #   https://{STORE_DOMAIN}/game    → game   (Traefik strips /game before forwarding)
 #   https://{STORE_DOMAIN}/api     → backend
 #   https://{ADMIN_DOMAIN}/        → admin  (separate subdomain, e.g. test-customer-admin.alkatatib.cloud)
+#
+# Database: shared MySQL instance in the database/ stack, reachable via shared-db network.
 
 services:
-
-  mysql:
-    image: mysql:8.0
-    container_name: ${CUSTOMER_NAME}-mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${DB_NAME}
-      MYSQL_USER: ${DB_USER}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
-    volumes:
-      - /opt/toy-store-data/${CUSTOMER_NAME}/mysql:/var/lib/mysql
-    networks:
-      - customer-net
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD}"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
-  redis:
-    image: redis:7-alpine
-    container_name: ${CUSTOMER_NAME}-redis
-    networks:
-      - customer-net
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
 
   backend:
     image: ghcr.io/${GITHUB_OWNER}/toy-store-backend:${CUSTOMER_NAME}
@@ -50,22 +21,15 @@ services:
     env_file:
       - customers/${CUSTOMER_NAME}/.env
     environment:
-      SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+      SPRING_DATASOURCE_URL: "jdbc:mysql://shared-mysql:3306/${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
       SPRING_DATASOURCE_USERNAME: ${DB_USER}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
-      SPRING_DATA_REDIS_HOST: redis
-      SPRING_DATA_REDIS_PORT: 6379
       FRONTEND_URL: https://${STORE_DOMAIN}
       CORS_ALLOWED_ORIGINS: "https://${STORE_DOMAIN},https://${ADMIN_DOMAIN}"
     networks:
-      - customer-net
+      - shared-db
       - traefik-public
     restart: unless-stopped
-    depends_on:
-      mysql:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-public"
@@ -78,7 +42,6 @@ services:
     image: ghcr.io/${GITHUB_OWNER}/toy-store-store:${CUSTOMER_NAME}
     container_name: ${CUSTOMER_NAME}-store
     networks:
-      - customer-net
       - traefik-public
     restart: unless-stopped
     labels:
@@ -95,7 +58,6 @@ services:
     image: ghcr.io/${GITHUB_OWNER}/toy-store-admin:${CUSTOMER_NAME}
     container_name: ${CUSTOMER_NAME}-admin
     networks:
-      - customer-net
       - traefik-public
     restart: unless-stopped
     labels:
@@ -111,7 +73,6 @@ services:
     image: ghcr.io/${GITHUB_OWNER}/toy-store-game:${CUSTOMER_NAME}
     container_name: ${CUSTOMER_NAME}-game
     networks:
-      - customer-net
       - traefik-public
     restart: unless-stopped
     labels:
@@ -126,7 +87,7 @@ services:
       - "traefik.http.routers.${CUSTOMER_NAME}-game.middlewares=${CUSTOMER_NAME}-game-strip"
 
 networks:
-  customer-net:
-    driver: bridge
+  shared-db:
+    external: true
   traefik-public:
     external: true

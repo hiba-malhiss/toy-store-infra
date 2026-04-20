@@ -1,0 +1,51 @@
+# Shared database stack — run ONCE on server setup, never per-customer.
+#
+# First-time setup:
+#   docker network create shared-db
+#   docker compose up -d
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: shared-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+    volumes:
+      - /opt/toy-store-data/mysql:/var/lib/mysql
+    networks:
+      - shared-db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: phpmyadmin
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_USER: root
+      PMA_PASSWORD: ${DB_ROOT_PASSWORD}
+    networks:
+      - shared-db
+      - traefik-public
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.routers.phpmyadmin.rule=Host(`phpmyadmin.alkatatib.cloud`)"
+      - "traefik.http.routers.phpmyadmin.entrypoints=websecure"
+      - "traefik.http.routers.phpmyadmin.tls.certresolver=letsencrypt"
+      - "traefik.http.services.phpmyadmin.loadbalancer.server.port=80"
+      # Basic auth — password hashed with bcrypt (each $ doubled for compose escaping)
+      - "traefik.http.middlewares.phpmyadmin-auth.basicauth.users=admin:$$2y$$05$$Fl4dxRoO8VoSjtChFakz4.83zxfs2/aWmGrPzUtECtFLRd8oVcqwW"
+      - "traefik.http.routers.phpmyadmin.middlewares=phpmyadmin-auth"
+
+networks:
+  shared-db:
+    external: true
+  traefik-public:
+    external: true

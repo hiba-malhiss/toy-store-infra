@@ -16,7 +16,7 @@ on:
         required: true
         type: string
       service:
-        description: 'Service to restart after update (backend / store / admin / game / mysql — leave empty to skip)'
+        description: 'Service to restart after update (backend / store / admin / game — leave empty to skip)'
         required: false
         default: ''
         type: string

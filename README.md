@@ -1,6 +1,6 @@
 # Toy Store Infra
 
-Multi-tenant deployment infrastructure for the Toy Store platform. Each customer gets a fully isolated Docker stack (backend, store, admin, game) served through a shared Traefik reverse proxy with automatic HTTPS.
+Multi-tenant deployment infrastructure for the Toy Store platform. Each customer gets a fully isolated Docker stack (backend, store, admin, game) served through a shared Traefik reverse proxy with automatic HTTPS. A shared MySQL instance and phpMyAdmin run as a separate stack.
 
 ---
 
@@ -15,19 +15,25 @@ Traefik (port 80/443)  ←  shared reverse proxy, one instance on the VPS
    ├── {customer}.alkatatib.cloud/         → store  (React)
    ├── {customer}.alkatatib.cloud/game     → game   (React, /game stripped before forwarding)
    ├── {customer}.alkatatib.cloud/api      → backend (Spring Boot :8080)
-   └── admin-{customer}.alkatatib.cloud/   → admin  (React, separate subdomain)
+   ├── admin-{customer}.alkatatib.cloud/   → admin  (React, separate subdomain)
+   ├── phpmyadmin.alkatatib.cloud          → phpMyAdmin (basic auth)
+   └── portainer.alkatatib.cloud           → Portainer (basic auth)
 
-Per-customer isolated stack (docker compose project = customer name):
-  {customer}-mysql    MySQL 8.0  (data at /opt/toy-store-data/{customer}/mysql)
-  {customer}-redis    Redis 7
+Shared database stack (one instance for all customers):
+  shared-mysql    MySQL 8.0  (data at /opt/toy-store-data/mysql, one DB per customer)
+  phpmyadmin      phpMyAdmin (view all customer DBs)
+
+Per-customer stack (docker compose project = customer name):
   {customer}-backend  Spring Boot  (image from ghcr.io)
   {customer}-store    Nginx serving React store
   {customer}-admin    Nginx serving React admin panel
   {customer}-game     Nginx serving React game
 ```
 
-All customer containers share the `traefik-public` Docker network so Traefik can route to them.
-Each stack also has its own private `customer-net` network for internal service communication.
+Three Docker networks:
+- **`traefik-public`** — HTTP/HTTPS routing (Traefik ↔ all web-facing containers)
+- **`shared-db`** — backend ↔ MySQL communication (TCP port 3306, no internet exposure)
+- Store/admin/game frontends are on `traefik-public` only (no DB access)
 
 ---
 
@@ -43,8 +49,11 @@ toy-store-infra/
 │   ├── .gitkeep
 │   └── {customer_name}/
 │       └── .env                # Per-customer secrets (gitignored, never committed)
+├── database/
+│   ├── docker-compose.yml      # Shared MySQL + phpMyAdmin (run once, not per-customer)
+│   └── .env                    # DB_ROOT_PASSWORD for shared MySQL (gitignored)
 ├── scripts/
-│   ├── new-customer.sh         # Scaffold a new customer env
+│   ├── new-customer.sh         # Scaffold a new customer env + create DB
 │   ├── deploy.sh               # First-time deploy
 │   ├── update.sh               # Rolling update (used by CI)
 │   ├── remove.sh               # Tear down a stack
@@ -57,9 +66,11 @@ toy-store-infra/
 
 ---
 
-## One-Time Server Setup (Traefik)
+## One-Time Server Setup
 
 Run this **once** when setting up a fresh VPS. Never repeat per customer.
+
+### 1. Traefik + Portainer
 
 ```bash
 cd /opt/toy-store-infra/traefik
@@ -67,7 +78,7 @@ cd /opt/toy-store-infra/traefik
 # Create cert storage file with correct permissions
 touch acme.json && chmod 600 acme.json
 
-# Create the shared Docker network all stacks attach to
+# Create the shared Docker network for HTTP routing
 docker network create traefik-public
 
 # Start Traefik + Portainer
@@ -75,6 +86,20 @@ docker compose up -d
 ```
 
 Portainer is available at `https://portainer.alkatatib.cloud` (basic auth protected).
+
+### 2. Shared Database
+
+```bash
+cd /opt/toy-store-infra/database
+
+# Create the shared Docker network for DB communication
+docker network create shared-db
+
+# Start MySQL + phpMyAdmin
+docker compose up -d
+```
+
+phpMyAdmin is available at `https://phpmyadmin.alkatatib.cloud` (basic auth protected).
 
 ---
 
@@ -96,8 +121,8 @@ cd /opt/toy-store-infra
 ./scripts/new-customer.sh {customer_name}
 ```
 
-This copies `.env.defaults`, auto-fills `CUSTOMER_NAME`, `STORE_DOMAIN`, and `ADMIN_DOMAIN`,
-and writes the result to `customers/{customer_name}/.env`.
+This copies `.env.defaults`, auto-fills `CUSTOMER_NAME`, `STORE_DOMAIN`, `ADMIN_DOMAIN`, and `DB_NAME`,
+writes the result to `customers/{customer_name}/.env`, and creates the database in the shared MySQL instance.
 
 ### 3. Review and fill the generated .env
 
@@ -107,7 +132,7 @@ nano customers/{customer_name}/.env
 
 Fields that must be set (not pre-filled by defaults):
 
-- `DB_USER`, `DB_ROOT_PASSWORD`, `DB_PASSWORD` — choose strong passwords
+- `DB_PASSWORD` — choose a strong password (shared across all customers)
 - `JWT_SECRET`, `CART_TOKEN_SECRET`, `APP_RATE_LIMIT_HMAC_SECRET` — generate with:
   ```bash
   openssl rand -hex 32
@@ -210,14 +235,14 @@ cat .ghcr-token | docker login ghcr.io -u hiba-malhiss --password-stdin
 ## Removing a Customer
 
 ```bash
-# Remove stack, keep database volumes
+# Remove stack (database preserved in shared MySQL)
 ./scripts/remove.sh {customer_name}
 
-# Remove stack AND permanently delete all data
-./scripts/remove.sh {customer_name} --volumes
+# Remove stack AND drop the customer's database from shared MySQL
+./scripts/remove.sh {customer_name} --drop-db
 ```
 
-The `--volumes` flag requires you to type the customer name to confirm before deleting.
+The `--drop-db` flag requires you to type the customer name to confirm before dropping the database.
 
 ---
 
@@ -280,22 +305,36 @@ docker compose -p {customer_name} \
 
 ## Rotating Secrets & Passwords
 
-### Database passwords (DB_PASSWORD / DB_ROOT_PASSWORD)
+### Database root password (DB_ROOT_PASSWORD)
 
-Changing the DB password requires updating both the `.env` file and the running MySQL container,
-otherwise the backend will fail to connect.
+The root password is stored in `database/.env` and used by the shared MySQL container.
 
 ```bash
-# 1. Update the .env
-nano /opt/toy-store-infra/customers/{customer_name}/.env
-# Edit DB_PASSWORD and/or DB_ROOT_PASSWORD
+# 1. Update the database stack env
+nano /opt/toy-store-infra/database/.env
+# Edit DB_ROOT_PASSWORD
 
-# 2. Update the password inside MySQL
-docker exec -it {customer_name}-mysql mysql -u root -p{OLD_ROOT_PASSWORD} \
+# 2. Recreate the shared MySQL container
+cd /opt/toy-store-infra/database
+docker compose up -d --force-recreate mysql
+```
+
+### Database app password (DB_PASSWORD)
+
+The app user password is shared across all customers. Changing it requires updating both
+the database stack and all customer `.env` files.
+
+```bash
+# 1. Update the password inside MySQL
+docker exec -it shared-mysql mysql -u root -p{ROOT_PASSWORD} \
   -e "ALTER USER 'user'@'%' IDENTIFIED BY '{NEW_PASSWORD}'; FLUSH PRIVILEGES;"
 
-# 3. Recreate backend (and mysql) to pick up the new env vars
-./scripts/update.sh {customer_name} mysql backend
+# 2. Update each customer .env
+nano /opt/toy-store-infra/customers/{customer_name}/.env
+# Edit DB_PASSWORD
+
+# 3. Recreate all backends
+./scripts/update.sh {customer_name} backend
 ```
 
 ### JWT / Cart / HMAC secrets (app secrets)
