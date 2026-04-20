@@ -1,0 +1,69 @@
+name: Update Customer Env Variable
+
+on:
+  workflow_dispatch:
+    inputs:
+      customer:
+        description: 'Customer name (e.g. alkatatib)'
+        required: true
+        type: string
+      variable:
+        description: 'Variable name (e.g. JWT_SECRET)'
+        required: true
+        type: string
+      value:
+        description: 'New value'
+        required: true
+        type: string
+      service:
+        description: 'Service to restart after update (backend / store / admin / game / mysql — leave empty to skip)'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  update-env:
+    name: Update ${{ inputs.variable }} for ${{ inputs.customer }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH and update env variable
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -euo pipefail
+
+            ENV_FILE="/opt/toy-store-infra/customers/${{ inputs.customer }}/.env"
+
+            if [ ! -f "$ENV_FILE" ]; then
+              echo "ERROR: No .env found for customer '${{ inputs.customer }}'"
+              exit 1
+            fi
+
+            # Escape value for sed (handle /, &, \, newline)
+            ESCAPED_VALUE=$(printf '%s\n' '${{ inputs.value }}' | sed 's/[\/&]/\\&/g')
+
+            # Update if key exists, append if it doesn't
+            if grep -q "^${{ inputs.variable }}=" "$ENV_FILE"; then
+              sed -i "s|^${{ inputs.variable }}=.*|${{ inputs.variable }}=${ESCAPED_VALUE}|" "$ENV_FILE"
+              echo "Updated ${{ inputs.variable }} in $ENV_FILE"
+            else
+              echo "${{ inputs.variable }}=${ESCAPED_VALUE}" >> "$ENV_FILE"
+              echo "Appended ${{ inputs.variable }} to $ENV_FILE"
+            fi
+
+            # Restart service if specified
+            if [ -n "${{ inputs.service }}" ]; then
+              echo "Restarting ${{ inputs.service }} for ${{ inputs.customer }}..."
+              cd /opt/toy-store-infra
+              docker compose \
+                -p "${{ inputs.customer }}" \
+                --env-file "$ENV_FILE" \
+                -f docker-compose.yml \
+                up -d --no-deps --force-recreate "${{ inputs.service }}"
+              echo "Done."
+            else
+              echo "No service specified — skipping restart. Remember to restart manually if needed."
+            fi
