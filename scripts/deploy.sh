@@ -13,7 +13,7 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 
 # Detect whether a custom domain is configured for this customer
-CUSTOM_DOMAIN=$(grep '^CUSTOM_DOMAIN=' "$ENV_FILE" | cut -d '=' -f2)
+CUSTOM_DOMAIN=$(grep '^CUSTOM_DOMAIN=' "$ENV_FILE" | cut -d '=' -f2 || true)
 COMPOSE_FILES="-f $DIR/docker-compose.yml"
 
 if [ -n "${CUSTOM_DOMAIN:-}" ]; then
