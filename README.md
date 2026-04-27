@@ -1,396 +1,239 @@
-# Toy Store Infra
+# Toy Store Infra — Operations Guide
 
-Multi-tenant deployment infrastructure for the Toy Store platform. Each customer gets a fully isolated Docker stack (backend, store, admin, game, Redis) served through a shared Traefik reverse proxy with automatic HTTPS. A shared MySQL and phpMyAdmin run as a separate stack.
-
----
-
-## Architecture Overview
-
-```
-Internet
-   │
-   ▼
-Traefik (port 80/443)  ←  shared reverse proxy, one instance on the VPS
-   │
-   ├── {customer}.alkatatib.cloud/         → store  (React)
-   ├── {customer}.alkatatib.cloud/game     → game   (React, /game stripped before forwarding)
-   ├── {customer}.alkatatib.cloud/api      → backend (Spring Boot :8080)
-   ├── admin-{customer}.alkatatib.cloud/   → admin  (React, separate subdomain)
-   ├── phpmyadmin.alkatatib.cloud          → phpMyAdmin (basic auth)
-   └── portainer.alkatatib.cloud           → Portainer (basic auth)
-
-Shared database stack (one instance for all customers):
-  shared-mysql    MySQL 8.0  (data at /opt/toy-store-data/mysql, one DB per customer)
-  phpmyadmin      phpMyAdmin (view all customer DBs)
-
-Per-customer stack (docker compose project = customer name):
-  {customer}-redis    Redis 7
-  {customer}-backend  Spring Boot  (image from ghcr.io)
-  {customer}-store    Nginx serving React store
-  {customer}-admin    Nginx serving React admin panel
-  {customer}-game     Nginx serving React game
-```
-
-Three Docker networks:
-- **`traefik-public`** — HTTP/HTTPS routing (Traefik ↔ all web-facing containers)
-- **`shared-db`** — backend ↔ MySQL communication (TCP port 3306, no internet exposure)
-- **`customer-net`** — backend ↔ Redis (private per-customer bridge)
-- Store/admin/game frontends are on `traefik-public` only (no DB/Redis access)
+VPS IP: `82.180.155.197`
 
 ---
 
-## Repository Structure
-
-```
-toy-store-infra/
-├── docker-compose.yml          # Customer stack template (never run directly)
-├── .env.template               # Documented template — read this to understand all vars
-├── .env.defaults               # Pre-filled shared defaults — basis for every new customer
-├── .gitignore
-├── customers/
-│   ├── .gitkeep
-│   └── {customer_name}/
-│       └── .env                # Per-customer secrets (gitignored, never committed)
-├── database/
-│   ├── docker-compose.yml      # Shared MySQL + phpMyAdmin (run once, not per-customer)
-│   └── .env                    # DB_ROOT_PASSWORD for shared MySQL (gitignored)
-├── scripts/
-│   ├── new-customer.sh         # Scaffold a new customer env + create DB
-│   ├── deploy.sh               # First-time deploy
-│   ├── update.sh               # Rolling update (used by CI)
-│   ├── remove.sh               # Tear down a stack
-│   └── logs.sh                 # Tail logs
-└── traefik/
-    ├── docker-compose.yml      # Traefik + Portainer (run once, not per-customer)
-    ├── traefik.yml             # Traefik static config
-    └── acme.json               # TLS certs managed by Traefik (gitignored)
-```
+## Table of Contents
+1. [Onboard a new customer](#1-onboard-a-new-customer)
+2. [Change the VPS root password](#2-change-the-vps-root-password)
+3. [Change the database password](#3-change-the-database-password)
+4. [Change the Portainer password](#4-change-the-portainer-password)
+5. [Change the PHPMyAdmin password](#5-change-the-phpmyadmin-password)
+6. [Change the base domain](#6-change-the-base-domain)
+7. [Add a custom domain for a customer](#7-add-a-custom-domain-for-a-customer)
 
 ---
 
-## One-Time Server Setup
-
-Run this **once** when setting up a fresh VPS. Never repeat per customer.
-
-### 1. Traefik + Portainer
+## 1. Onboard a new customer
 
 ```bash
-cd /opt/toy-store-infra/traefik
+# Step 1 - create env + database
+./scripts/new-customer.sh <customer_name>
 
-# Create cert storage file with correct permissions
-touch acme.json && chmod 600 acme.json
+# Step 2 - add DNS records at your registrar (or wildcard *.kidotoysco.com already covers it)
+#   <customer_name>.kidotoysco.com        -> A -> 82.180.155.197
+#   admin-<customer_name>.kidotoysco.com  -> A -> 82.180.155.197
 
-# Create the shared Docker network for HTTP routing
-docker network create traefik-public
+# Step 3 - build frontend images with the customer domain baked in
+./scripts/build.sh <customer_name>
 
-# Start Traefik + Portainer
-docker compose up -d
+# Step 4 - start the stack
+./scripts/deploy.sh <customer_name>
 ```
 
-Portainer is available at `https://portainer.alkatatib.cloud` (basic auth protected).
-
-### 2. Shared Database
-
-```bash
-cd /opt/toy-store-infra/database
-
-# Create the shared Docker network for DB communication
-docker network create shared-db
-
-# Start MySQL + phpMyAdmin
-docker compose up -d
-```
-
-phpMyAdmin is available at `https://phpmyadmin.alkatatib.cloud` (basic auth protected).
+URLs after deploy:
+- Store: `https://<customer_name>.kidotoysco.com`
+- Admin: `https://admin-<customer_name>.kidotoysco.com`
+- Game:  `https://<customer_name>.kidotoysco.com/game`
+- API:   `https://<customer_name>.kidotoysco.com/api`
 
 ---
 
-## Adding a New Customer
+## 2. Change the VPS root password
 
-### 1. DNS
-
-Add two A records pointing to the VPS IP:
-
-| Record | Value |
-|--------|-------|
-| `{customer}.alkatatib.cloud` | VPS IP |
-| `admin-{customer}.alkatatib.cloud` | VPS IP |
-
-### 2. Scaffold the customer env
-
-```bash
-cd /opt/toy-store-infra
-./scripts/new-customer.sh {customer_name}
-```
-
-This copies `.env.defaults`, auto-fills `CUSTOMER_NAME`, `STORE_DOMAIN`, `ADMIN_DOMAIN`, and `DB_NAME`,
-writes the result to `customers/{customer_name}/.env`, and creates the database in the shared MySQL instance.
-
-### 3. Review and fill the generated .env
-
-```bash
-nano customers/{customer_name}/.env
-```
-
-Fields that must be set (not pre-filled by defaults):
-
-- `DB_PASSWORD` — choose a strong password (shared across all customers)
-- `JWT_SECRET`, `CART_TOKEN_SECRET`, `APP_RATE_LIMIT_HMAC_SECRET` — generate with:
-  ```bash
-  openssl rand -hex 32
-  ```
-- Brevo (email) and Cloudinary (storage) — copy from shared account or create per-customer
-
-### 4. First deploy
-
-```bash
-./scripts/deploy.sh {customer_name}
-```
-
-Pulls all Docker images from GHCR and starts the stack.
-Traefik will automatically issue a Let's Encrypt TLS cert for both domains.
-
----
-
-## Updating a Customer (Rolling Update)
-
-Pull the latest images and recreate changed containers:
-
-```bash
-# Update all services
-./scripts/update.sh {customer_name}
-
-# Update specific services only
-./scripts/update.sh {customer_name} backend
-./scripts/update.sh {customer_name} store admin game
-```
-
-This is also triggered automatically by **GitHub Actions** after a new image is pushed to GHCR.
-
----
-
-## Environment Variables
-
-### Where they live
-
-| File | Purpose |
-|------|---------|
-| `.env.template` | Full documented reference for every variable |
-| `.env.defaults` | Shared pre-filled values used as base for new customers |
-| `customers/{name}/.env` | Live secrets for a specific customer (gitignored) |
-
-### Updating a secret for an existing customer
-
-1. Edit the customer env file:
-   ```bash
-   nano /opt/toy-store-infra/customers/{customer_name}/.env
-   ```
-2. Recreate the affected container:
-   ```bash
-   ./scripts/update.sh {customer_name} backend   # or whichever service uses the changed var
-   ```
-
-### Updating a shared default
-
-Edit `.env.defaults`. This only affects **new** customers created after the change.
-Existing customer `.env` files are independent copies and are not touched.
-
----
-
-## GHCR Token (Docker Pull Secret)
-
-Docker images are hosted as private packages on the GitHub Container Registry (`ghcr.io`).
-Pulling them requires a GitHub Personal Access Token with `read:packages` scope.
-
-### Where it is stored
-
-```
-/opt/toy-store-infra/.ghcr-token
-```
-
-Plain text file, gitignored, never committed.
-
-### How it is used
-
-`deploy.sh` and `update.sh` read this file before pulling images:
-
-```bash
-cat .ghcr-token | docker login ghcr.io -u hiba-malhiss --password-stdin
-```
-
-### Rotating the token
-
-1. Go to GitHub → Settings → Developer settings → Personal access tokens
-2. Generate a new token with `read:packages` scope
-3. Update the file on the server:
-   ```bash
-   echo "ghp_YOUR_NEW_TOKEN" > /opt/toy-store-infra/.ghcr-token
-   chmod 600 /opt/toy-store-infra/.ghcr-token
-   ```
-4. Verify it works:
-   ```bash
-   cat /opt/toy-store-infra/.ghcr-token | docker login ghcr.io -u hiba-malhiss --password-stdin
-   ```
-
----
-
-## Removing a Customer
-
-```bash
-# Remove stack (database preserved in shared MySQL)
-./scripts/remove.sh {customer_name}
-
-# Remove stack AND drop the customer's database from shared MySQL
-./scripts/remove.sh {customer_name} --drop-db
-```
-
-The `--drop-db` flag requires you to type the customer name to confirm before dropping the database.
-
----
-
-## Viewing Logs
-
-```bash
-# All services
-./scripts/logs.sh {customer_name}
-
-# Specific service
-./scripts/logs.sh {customer_name} backend
-./scripts/logs.sh {customer_name} store
-```
-
----
-
-## Docker Images
-
-Images are built and pushed to GHCR by GitHub Actions.
-Each customer gets its own image tag matching the customer name:
-
-| Service | Image |
-|---------|-------|
-| Backend | `ghcr.io/hiba-malhiss/toy-store-backend:{customer_name}` |
-| Store | `ghcr.io/hiba-malhiss/toy-store-store:{customer_name}` |
-| Admin | `ghcr.io/hiba-malhiss/toy-store-admin:{customer_name}` |
-| Game | `ghcr.io/hiba-malhiss/toy-store-game:{customer_name}` |
-
----
-
-## Existing Customers
-
-| Customer | Store | Admin |
-|----------|-------|-------|
-| `alkatatib` | https://alkatatib.alkatatib.cloud | https://admin-alkatatib.alkatatib.cloud |
-| `test-customer` | https://test-customer.alkatatib.cloud | https://admin-test-customer.alkatatib.cloud |
-
----
-
-## Useful Commands
-
-```bash
-# Check running containers for a customer
-docker compose -p {customer_name} ps
-
-# Check all running containers across all stacks
-docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-
-# Inspect Traefik routing logs
-docker logs traefik
-
-# Restart a single service without full redeploy
-docker compose -p {customer_name} \
-  --env-file customers/{customer_name}/.env \
-  -f docker-compose.yml \
-  restart backend
-```
-
----
-
-## Rotating Secrets & Passwords
-
-### Database root password (DB_ROOT_PASSWORD)
-
-The root password is stored in `database/.env` and used by the shared MySQL container.
-
-```bash
-# 1. Update the database stack env
-nano /opt/toy-store-infra/database/.env
-# Edit DB_ROOT_PASSWORD
-
-# 2. Recreate the shared MySQL container
-cd /opt/toy-store-infra/database
-docker compose up -d --force-recreate mysql
-```
-
-### Database app password (DB_PASSWORD)
-
-The app user password is shared across all customers. Changing it requires updating both
-the database stack and all customer `.env` files.
-
-```bash
-# 1. Update the password inside MySQL
-docker exec -it shared-mysql mysql -u root -p{ROOT_PASSWORD} \
-  -e "ALTER USER 'user'@'%' IDENTIFIED BY '{NEW_PASSWORD}'; FLUSH PRIVILEGES;"
-
-# 2. Update each customer .env
-nano /opt/toy-store-infra/customers/{customer_name}/.env
-# Edit DB_PASSWORD
-
-# 3. Recreate all backends
-./scripts/update.sh {customer_name} backend
-```
-
-### JWT / Cart / HMAC secrets (app secrets)
-
-These are only read at backend startup, so a simple container recreate is enough:
-
-```bash
-# 1. Generate a new secret
-openssl rand -hex 32
-
-# 2. Update the .env
-nano /opt/toy-store-infra/customers/{customer_name}/.env
-# Paste the new value for JWT_SECRET, CART_TOKEN_SECRET, or APP_RATE_LIMIT_HMAC_SECRET
-
-# 3. Recreate the backend
-./scripts/update.sh {customer_name} backend
-```
-
-Note: rotating JWT_SECRET will invalidate all active user sessions (everyone gets logged out).
-
-### GHCR token (Docker pull token)
-
-See the **GHCR Token** section above for the full rotation steps.
-
-### Brevo (email) credentials
-
-```bash
-# 1. Get new credentials from https://app.brevo.com → SMTP & API → SMTP
-# 2. Update .env
-nano /opt/toy-store-infra/customers/{customer_name}/.env
-# Edit BREVO_SMTP_PASSWORD and/or BREVO_API_KEY
-
-# 3. Restart backend
-./scripts/update.sh {customer_name} backend
-```
-
-### Cloudinary credentials
-
-```bash
-# 1. Get keys from https://cloudinary.com/console
-# 2. Update .env
-nano /opt/toy-store-infra/customers/{customer_name}/.env
-# Edit CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET
-
-# 3. Restart backend
-./scripts/update.sh {customer_name} backend
-```
-
-### VPS root password
-
-Change directly on the VPS (or via your hosting provider's panel):
+SSH into the VPS and run:
 
 ```bash
 passwd root
+# enter new password twice
 ```
 
-Update the password in any CI/CD secrets or documentation that references it.
+> Keep the new password in a secure place. All deploy scripts and SSH access depend on it.
+
+---
+
+## 3. Change the database password
+
+There are **two separate passwords** to update.
+
+### 3a. MySQL root password
+Used by PHPMyAdmin and by new-customer.sh to create databases.
+
+```bash
+# 1. Change it inside MySQL
+docker exec shared-mysql mysql -u root -pOLD_PASSWORD \
+  -e "ALTER USER root@localhost IDENTIFIED BY NEW_PASSWORD; FLUSH PRIVILEGES;"
+
+# 2. Update the file
+nano /opt/toy-store-infra/database/.env
+#    change: DB_ROOT_PASSWORD=NEW_PASSWORD
+
+# 3. Restart phpmyadmin to pick up new creds
+cd /opt/toy-store-infra/database && docker compose up -d
+```
+
+### 3b. Per-customer app password (DB_PASSWORD)
+Used by each customer Spring backend to connect to MySQL.
+
+```bash
+# 1. Change it inside MySQL
+docker exec shared-mysql mysql -u root -pROOT_PASSWORD \
+  -e "ALTER USER user@% IDENTIFIED BY NEW_PASSWORD; FLUSH PRIVILEGES;"
+
+# 2. Update every customer .env file
+nano /opt/toy-store-infra/customers/<customer_name>/.env
+#    change: DB_PASSWORD=NEW_PASSWORD
+
+# 3. Restart each backend
+docker restart <customer_name>-backend
+```
+
+---
+
+## 4. Change the Portainer password
+
+Portainer is at https://portainer.kidotoysco.com
+
+### Via the Portainer web UI (easiest)
+1. Log in to https://portainer.kidotoysco.com
+2. Click your username (top-right) -> My account -> Change password
+
+### Via CLI (if locked out)
+```bash
+docker exec -it portainer /app/portainer --admin-password NEW_PASSWORD
+docker restart portainer
+```
+
+### Change the Traefik HTTP basic-auth protecting /portainer
+This is a separate auth layer in front of Portainer (username: admin).
+
+```bash
+# 1. Generate a new bcrypt hash
+docker run --rm httpd:2.4-alpine htpasswd -nbB admin NEW_PASSWORD
+# Output example:  admin:$2y$05$abc...
+
+# 2. Double every $ sign in the hash (Docker Compose escaping rule)
+#    $2y$05$abc  ->  $$2y$$05$$abc
+
+# 3. Update traefik/docker-compose.yml
+nano /opt/toy-store-infra/traefik/docker-compose.yml
+#    update the basicauth.users line under portainer-auth middleware
+
+# 4. Recreate the container
+cd /opt/toy-store-infra/traefik && docker compose up -d --force-recreate portainer
+```
+
+---
+
+## 5. Change the PHPMyAdmin password
+
+PHPMyAdmin at https://phpmyadmin.kidotoysco.com is protected by Traefik HTTP basic auth (username: admin).
+
+```bash
+# 1. Generate a new bcrypt hash
+docker run --rm httpd:2.4-alpine htpasswd -nbB admin NEW_PASSWORD
+# Output example:  admin:$2y$05$abc...
+
+# 2. Double every $ sign in the hash (Docker Compose escaping rule)
+#    $2y$05$abc  ->  $$2y$$05$$abc
+
+# 3. Update database/docker-compose.yml
+nano /opt/toy-store-infra/database/docker-compose.yml
+#    update the basicauth.users line under phpmyadmin-auth middleware
+
+# 4. Recreate the container
+cd /opt/toy-store-infra/database && docker compose up -d --force-recreate phpmyadmin
+```
+
+Note: PHPMyAdmin uses the MySQL root password to connect — change that in step 3a.
+
+---
+
+## 6. Change the base domain
+
+Full walkthrough for switching from kidotoysco.com to newdomain.com.
+
+### Step 1 - Update the new-customer script
+```bash
+nano /opt/toy-store-infra/scripts/new-customer.sh
+# change: BASE_DOMAIN="kidotoysco.com"  ->  BASE_DOMAIN="newdomain.com"
+```
+
+### Step 2 - Update every customer .env
+```bash
+nano /opt/toy-store-infra/customers/<customer_name>/.env
+# change STORE_DOMAIN and ADMIN_DOMAIN to use the new domain
+```
+
+### Step 3 - Update Portainer and PHPMyAdmin labels
+```bash
+nano /opt/toy-store-infra/traefik/docker-compose.yml
+# change portainer.kidotoysco.com -> portainer.newdomain.com
+
+nano /opt/toy-store-infra/database/docker-compose.yml
+# change phpmyadmin.kidotoysco.com -> phpmyadmin.newdomain.com
+```
+
+### Step 4 - Update the deploy summary in update.sh
+```bash
+nano /opt/toy-store-infra/scripts/update.sh
+# change portainer.kidotoysco.com -> portainer.newdomain.com
+```
+
+### Step 5 - Rebuild frontend images for each customer
+The API URL is baked into the JS bundle at build time.
+```bash
+./scripts/build.sh <customer_name>
+```
+
+### Step 6 - Clear SSL cert cache and restart everything
+```bash
+# Reset cert storage so Traefik requests fresh certs for the new domain
+echo "{}" > /opt/toy-store-infra/traefik/acme.json
+chmod 600 /opt/toy-store-infra/traefik/acme.json
+
+# Restart shared services
+cd /opt/toy-store-infra/traefik   && docker compose up -d
+cd /opt/toy-store-infra/database  && docker compose up -d
+
+# Redeploy each customer stack
+cd /opt/toy-store-infra
+docker compose -p <customer_name> --env-file customers/<customer_name>/.env -f docker-compose.yml up -d
+```
+
+### Step 7 - Add DNS records at your registrar
+```
+*.newdomain.com          A  82.180.155.197   (wildcard covers all customers)
+portainer.newdomain.com  A  82.180.155.197
+phpmyadmin.newdomain.com A  82.180.155.197
+```
+
+Wait 5-30 minutes for DNS to propagate. Traefik auto-issues SSL certs once DNS resolves.
+
+---
+
+## 7. Add a custom domain for a customer
+
+### Step 1 - Edit the customer .env
+```bash
+nano /opt/toy-store-infra/customers/<customer_name>/.env
+# Add these two lines:
+CUSTOM_DOMAIN=mystore.com
+CUSTOM_ADMIN_DOMAIN=admin.mystore.com
+```
+
+### Step 2 - Redeploy the customer stack
+deploy.sh auto-detects CUSTOM_DOMAIN and merges the extra Traefik routes.
+```bash
+./scripts/deploy.sh <customer_name>
+```
+
+### Step 3 - Customer adds DNS records at their registrar
+```
+mystore.com        A  82.180.155.197
+admin.mystore.com  A  82.180.155.197
+```
+
+SSL cert for the custom domain is issued automatically once DNS propagates.
+The original subdomain (<customer>.kidotoysco.com) continues to work as a fallback.

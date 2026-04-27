@@ -36,7 +36,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-public"
-      - "traefik.http.routers.phpmyadmin.rule=Host(`phpmyadmin.alkatatib.cloud`)"
+      - "traefik.http.routers.phpmyadmin.rule=Host(`phpmyadmin.kidotoysco.com`)"
       - "traefik.http.routers.phpmyadmin.entrypoints=websecure"
       - "traefik.http.routers.phpmyadmin.tls.certresolver=letsencrypt"
       - "traefik.http.services.phpmyadmin.loadbalancer.server.port=80"

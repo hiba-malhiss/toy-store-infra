@@ -12,18 +12,29 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
+# Detect whether a custom domain is configured for this customer
+CUSTOM_DOMAIN=$(grep '^CUSTOM_DOMAIN=' "$ENV_FILE" | cut -d '=' -f2)
+COMPOSE_FILES="-f $DIR/docker-compose.yml"
+
+if [ -n "${CUSTOM_DOMAIN:-}" ]; then
+  echo "==> Custom domain detected: $CUSTOM_DOMAIN -- merging custom-domain override..."
+  COMPOSE_FILES="-f $DIR/docker-compose.yml -f $DIR/docker-compose.custom-domain.yml"
+fi
+
 echo "==> Pulling images for $CUSTOMER..."
+# shellword-split COMPOSE_FILES intentionally here
+# shellcheck disable=SC2086
 docker compose \
   -p "$CUSTOMER" \
   --env-file "$ENV_FILE" \
-  -f "$DIR/docker-compose.yml" \
+  $COMPOSE_FILES \
   pull
 
 echo "==> Starting stack for $CUSTOMER..."
 docker compose \
   -p "$CUSTOMER" \
   --env-file "$ENV_FILE" \
-  -f "$DIR/docker-compose.yml" \
+  $COMPOSE_FILES \
   up -d
 
 echo "==> Done. Stack '$CUSTOMER' is running."

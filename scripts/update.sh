@@ -19,7 +19,15 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-COMPOSE="docker compose -p $CUSTOMER --env-file $ENV_FILE -f $DIR/docker-compose.yml"
+# Detect whether a custom domain is configured
+CUSTOM_DOMAIN=$(grep '^CUSTOM_DOMAIN=' "$ENV_FILE" | cut -d '=' -f2)
+COMPOSE_FLAG="-f $DIR/docker-compose.yml"
+if [ -n "${CUSTOM_DOMAIN:-}" ]; then
+  echo "==> Custom domain detected: $CUSTOM_DOMAIN -- merging custom-domain override..."
+  COMPOSE_FLAG="-f $DIR/docker-compose.yml -f $DIR/docker-compose.custom-domain.yml"
+fi
+
+COMPOSE="docker compose -p $CUSTOMER --env-file $ENV_FILE $COMPOSE_FLAG"
 TOKEN_FILE="$DIR/.ghcr-token"
 
 if [ -f "$TOKEN_FILE" ]; then
@@ -53,6 +61,6 @@ echo "║  🔌 API        https://${STORE_DOMAIN}/api"
 echo "║  ❤️  Health     https://${STORE_DOMAIN}/api/actuator/health"
 echo "╠══════════════════════════════════════════════════════════╣"
 echo "║  🖥️  VPS IP     ${VPS_IP}"
-echo "║  🐳 Portainer  https://portainer.alkatatib.cloud"
+echo "║  🐳 Portainer  https://portainer.kidotoysco.com"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""

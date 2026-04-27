@@ -5,7 +5,7 @@
 set -euo pipefail
 
 CUSTOMER=${1:?Usage: $0 <customer_name>}
-BASE_DOMAIN="alkatatib.cloud"
+BASE_DOMAIN="kidotoysco.com"
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$DIR/customers/$CUSTOMER/.env"
 DEFAULTS="$DIR/.env.defaults"
@@ -56,6 +56,7 @@ echo "Make sure these DNS A records point to your VPS IP:"
 echo "  $CUSTOMER.$BASE_DOMAIN        → your VPS IP"
 echo "  admin-$CUSTOMER.$BASE_DOMAIN  → your VPS IP"
 echo ""
-echo "Then run:"
-echo "  ./scripts/deploy.sh $CUSTOMER"
+echo "Then run (in order):"
+echo "  ./scripts/build.sh $CUSTOMER    # build frontend images with domain baked in"
+echo "  ./scripts/deploy.sh $CUSTOMER   # pull backend image and start stack"
 echo ""
